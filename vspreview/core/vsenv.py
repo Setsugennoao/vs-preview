@@ -7,6 +7,8 @@ from concurrent.futures import Future
 from threading import Lock
 from typing import Any, Callable, TypeVar
 
+from jetpytools import CustomImportError, DependencyNotFoundError
+from vstools import vs
 from PyQt6.QtCore import QObject, QRunnable, QThreadPool, pyqtSignal
 from vapoursynth import CoreCreationFlags, LogHandle
 from vsengine.loops import EventLoop, set_loop  # type: ignore[import-untyped]
@@ -41,7 +43,47 @@ class FlagsPolicy(Policy):
 
 
 def _monkey_runpy_func(*args: Any, **kwargs: Any) -> Any:
-    glob_dict = orig_runpy_run_code(*args, **kwargs)
+    # TODO: Update the guide to better separate plugins and Python packages, then update this URL
+    base_url = 'https://jaded-encoding-thaumaturgy.github.io/JET-guide/master'
+    guide_url = f'{base_url}/basics/installation/#installing-vapoursynth-plugins'
+
+    try:
+        glob_dict = orig_runpy_run_code(*args, **kwargs)
+    except ModuleNotFoundError as e:
+        raise DependencyNotFoundError(
+            'vspreview', e.name,
+            f'Could not find the Python package, \'{e.name}\'! '
+            f'Please install it and try again.\n'
+            f'See {guide_url} for installation instructions.'
+        )
+
+    except AttributeError as e:
+        # Only handle VapourSynth-related attribute errors
+        vs_types = (
+            type(vs), vs.VideoNode, vs.VideoFrame, vs.RawNode,
+            vs.VideoFormat, vs.Core, vs.Plugin, vs.Function,
+            vs.AudioNode, vs.AudioFrame
+        )
+
+        if not hasattr(e, 'obj') or not any(isinstance(e.obj, t) for t in vs_types):
+            raise
+
+        dep = e.name if hasattr(e, 'name') else str(e).partition('named ')[2].partition('.')[0].strip()
+
+        raise DependencyNotFoundError(
+            'vspreview', dep,
+            f'Could not find the VapourSynth plugin, \'{dep}\'! '
+            f'Please install it and try again.\n'
+            f'See {guide_url} for installation instructions.'
+        )
+
+    except ImportError as e:
+        raise CustomImportError(
+            e.path or '', e.name or '',
+            f'Failed to import \'{e.name}\' from the installed Python package @ \'{e.path}\'! '
+            f'Please check that the Python package is installed correctly and up to date.\n'
+            f'See {guide_url} for installation instructions.'
+        )
 
     if '_monkey_runpy' in glob_dict:
         _monkey_runpy_dicts[glob_dict['_monkey_runpy']] = glob_dict
